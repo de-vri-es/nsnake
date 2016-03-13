@@ -3,6 +3,7 @@
 #include <thread>
 #include <chrono>
 #include <random>
+#include <clocale>
 
 #include <curses.h>
 
@@ -11,6 +12,11 @@ namespace snake {
 	const int right = 1;
 	const int down  = 2;
 	const int left  = 3;
+
+	std::uint32_t upper_block = L'\u2580';
+	std::uint32_t lower_block = L'\u2584';
+	std::uint32_t full_block  = L'\u2588';
+	std::uint32_t empty_block = L'\u0020';
 
 	/// A point in a 2D space.
 	struct Point {
@@ -39,18 +45,18 @@ namespace snake {
 	/// A playing field.
 	struct Field {
 		Size size;
-		std::vector<chtype> data;
+		std::vector<bool> data;
 	};
 
 	/// A snake game.
 	struct Game {
 		bool alive = true;
 		int score = 0;
+		Size board_size;
 		Snake snake;
 		Point fruit;
 		std::string message;
 		std::mt19937 * generator;
-		Field field;
 	};
 
 	/// Get the opposite of a given direction.
@@ -115,44 +121,47 @@ namespace snake {
 	}
 
 	/// Make a field with the given width and height.
-	Field makeField(int width, int height) {
+	Field makeField(Size size) {
 		Field result;
-		result.size.width  = width;
-		result.size.height = height;
-		result.data        = std::vector<chtype>(width * height);
+		result.size = size;
+		result.data = std::vector<bool>(size.width * size.height);
 		return result;
 	}
 
 	/// Clear a field from all drawings.
 	void clearField(Field & field) {
 		for (unsigned int i = 0; i < field.data.size(); ++i) {
-			field.data[i] = ' ';
+			field.data[i] = false;
 		}
 	}
 
-	/// Draw a character at a given location on a field.
-	void drawCharacter(char c, Point const & location, Field & field) {
-		field.data[location.y * field.size.width + location.x] = c;
+	/// Get the value of a pixel in a field.
+	bool getPixel(Field const & field, Point const & location) {
+		return field.data[location.y * field.size.width + location.x];
+	}
+
+	/// Set the value of a pixel in a field.
+	void drawPixel(Field & field, Point const & location, bool value) {
+		field.data[location.y * field.size.width + location.x] = value;
 	}
 
 	/// Draw a line on a field. Returns the end point of the line.
-	Point drawLine(char c, Point const & start, int direction, int length, Field & field) {
+	Point drawLine(Field & field, Point const & start, int direction, int length) {
 		Point point = start;
 		for (int i = 0; i < length; ++i) {
-			drawCharacter(c, point, field);
+			drawPixel(field, point, true);
 			point = advance(point, direction);
 		}
 		return point;
 	}
 
 	/// Draw a snake on a field.
-	void drawSnake(Snake const & snake, Field & field) {
+	void drawSnake(Field & field, Snake const & snake) {
 		Point start = snake.head;
 		for (unsigned int i = 0; i < snake.segments.size(); ++i) {
 			Segment const & segment = snake.segments[i];
-			start = drawLine('o', start, opposite(segment.direction), segment.length, field);
+			start = drawLine(field, start, opposite(segment.direction), segment.length);
 		}
-		drawCharacter('O', snake.head, field);
 	}
 
 	/// Move the snake head forward in a given direction.
@@ -188,20 +197,20 @@ namespace snake {
 		game.score   = 0;
 		game.message = "";
 
-		game.snake.head.x = game.field.size.width  / 2;
-		game.snake.head.y = game.field.size.height / 2;
+		game.snake.head.x = game.board_size.width  / 2;
+		game.snake.head.y = game.board_size.height / 2;
 		game.snake.segments.clear();
 		game.snake.segments.push_back(Segment{up, 1});
 	}
 
 	/// Spawn new fruit on the board.
 	void spawnFruit(Game & game) {
-		std::uniform_int_distribution<int> random(0, game.field.data.size() - 1);
+		std::uniform_int_distribution<int> random(0, game.board_size.width * game.board_size.height);
 		Point fruit;
 		while (true) {
 			int i = random(*game.generator);
-			fruit.x = i % game.field.size.width;
-			fruit.y = i / game.field.size.width;
+			fruit.x = i % game.board_size.width;
+			fruit.y = i / game.board_size.width;
 			if (!pointCollidesWithSnake(fruit, game.snake)) break;
 		}
 		game.fruit = fruit;
@@ -244,7 +253,7 @@ namespace snake {
 		}
 
 		// Make sure the snake did not collide with anything.
-		if (snakeCollided(game.snake, game.field.size)) {
+		if (snakeCollided(game.snake, game.board_size)) {
 			game.snake   = old_snake;
 			game.alive   = false;
 			game.message = "You are dead. Press [Enter] to reset.";
@@ -254,8 +263,17 @@ namespace snake {
 
 	/// Print a field to the screen.
 	void printField(int y, int x, Field const & field) {
-		for (int i = 0; i < field.size.height; ++i) {
-			mvaddchnstr(y + i, x, &field.data[i * field.size.width], field.size.width);
+		cchar_t buffer;
+		buffer.attr = A_NORMAL;
+
+		for (int i = 0; i < field.size.height; i += 2) {
+			move(y + i / 2, x);
+			for (int j = 0; j < field.size.width; ++j) {
+				bool top    = getPixel(field, {j, i});
+				bool bottom = i + 1 < field.size.height && getPixel(field, {j, i+1});
+				buffer.chars[0] = top && bottom ? full_block : top ? upper_block : bottom ? lower_block : empty_block;
+				add_wch(&buffer);
+			}
 		}
 	}
 }
@@ -283,14 +301,17 @@ void cursesBox(int y, int x, int width, int height) {
 }
 
 int main() {
+	std::setlocale(LC_ALL, "");
 	// Initialize random device and generator.
 	std::random_device rand;
 	std::mt19937 generator(rand());
 
 	snake::Game game;
-	game.generator = &generator;
-	game.field     = snake::makeField(10, 10);
+	game.generator  = &generator;
+	game.board_size = {10, 10};
 	snake::resetGame(game);
+
+	snake::Field field = makeField(game.board_size);
 
 	initNcurses();
 
@@ -298,14 +319,14 @@ int main() {
 		int input = 0;
 		while (true) {
 			// Draw the current game state.
-			clearField(game.field);
-			drawCharacter('%', game.fruit, game.field);
-			drawSnake(game.snake, game.field);
+			clearField(field);
+			drawPixel(field, game.fruit, true);
+			drawSnake(field, game.snake);
 			mvprintw(0, 0, "Score: %u", game.score);           clrtoeol();
 			mvprintw(1, 0, "%s",        game.message.c_str()); clrtoeol();
 
-			cursesBox(2, 0, game.field.size.width + 2, game.field.size.height + 2);
-			printField(3, 2, game.field);
+			cursesBox(2, 0, field.size.width + 1, field.size.height / 2 + 1);
+			printField(3, 1, field);
 			refresh();
 
 			// Wait a bit, get input and update the game.
