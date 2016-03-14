@@ -200,7 +200,7 @@ namespace snake {
 		game.snake.head.x = game.board_size.width  / 2;
 		game.snake.head.y = game.board_size.height / 2;
 		game.snake.segments.clear();
-		game.snake.segments.push_back(Segment{up, 1});
+		game.snake.segments.push_back(Segment{up, 3});
 	}
 
 	/// Spawn new fruit on the board.
