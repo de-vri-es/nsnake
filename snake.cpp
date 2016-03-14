@@ -331,7 +331,7 @@ int main() {
 			refresh();
 
 			// Wait a bit, get input and update the game.
-			std::this_thread::sleep_for(std::chrono::milliseconds(1000 / 4));
+			std::this_thread::sleep_for(std::chrono::milliseconds(10000 / (40 + game.score)));
 			input = getch();
 			if (input == 27 || input == 'q') break;
 			doTick(game, input);
