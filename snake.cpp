@@ -205,7 +205,7 @@ namespace snake {
 
 	/// Spawn new fruit on the board.
 	void spawnFruit(Game & game) {
-		std::uniform_int_distribution<int> random(0, game.board_size.width * game.board_size.height);
+		std::uniform_int_distribution<int> random(0, game.board_size.width * game.board_size.height - 1);
 		Point fruit;
 		while (true) {
 			int i = random(*game.generator);
