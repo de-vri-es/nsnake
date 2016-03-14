@@ -93,8 +93,8 @@ namespace snake {
 		int dy = point.y - line_start.y;
 
 		switch (line_direction) {
-			case up:     return dx == 0 &&  dy >= 0 &&  dy < line_length;
-			case down:   return dx == 0 && -dy >= 0 && -dy < line_length;
+			case up:     return dx == 0 && -dy >= 0 && -dy < line_length;
+			case down:   return dx == 0 &&  dy >= 0 &&  dy < line_length;
 			case left:   return dy == 0 && -dx >= 0 && -dx < line_length;
 			case right:  return dy == 0 &&  dx >= 0 &&  dx < line_length;
 		}
@@ -108,14 +108,14 @@ namespace snake {
 	}
 
 	/// Check for a collision of a point with a snake.
-	bool pointCollidesWithSnake(Point const & point, Snake const & snake) {
+	bool pointCollidesWithSnake(Point const & point, Snake const & snake, bool check_head = true) {
 		Point start = snake.head;
 		for (unsigned int i = 0; i < snake.segments.size(); ++i) {
 			Segment const & segment = snake.segments[i];
-			start = advance(start, segment.direction, segment.length);
-			if (i > 0 && pointOnLine(point, start, segment.direction, segment.length)) {
+			if ((check_head || i > 0) && pointOnLine(point, start, opposite(segment.direction), segment.length)) {
 				return true;
 			}
+			start = advance(start, opposite(segment.direction), segment.length);
 		}
 		return false;
 	}
@@ -188,7 +188,7 @@ namespace snake {
 
 	/// Check if the snake has in internal or external collision.
 	bool snakeCollided(Snake const & snake, Size const & field_size) {
-		return pointCollidesWithSnake(snake.head, snake) || !pointInsideArea(snake.head, field_size);
+		return pointCollidesWithSnake(snake.head, snake, false) || !pointInsideArea(snake.head, field_size);
 	}
 
 	/// Reset a game.
