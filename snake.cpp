@@ -5,7 +5,7 @@
 #include <random>
 #include <clocale>
 
-#include <curses.h>
+#include <cursesw.h>
 
 namespace snake {
 	const int up    = 0;
@@ -264,7 +264,8 @@ namespace snake {
 	/// Print a field to the screen.
 	void printField(int y, int x, Field const & field) {
 		cchar_t buffer;
-		buffer.attr = A_NORMAL;
+		buffer.attr     = A_NORMAL;
+		buffer.chars[1] = 0;
 
 		for (int i = 0; i < field.size.height; i += 2) {
 			move(y + i / 2, x);
