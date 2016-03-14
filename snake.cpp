@@ -309,7 +309,7 @@ int main() {
 
 	snake::Game game;
 	game.generator  = &generator;
-	game.board_size = {10, 10};
+	game.board_size = {20, 20};
 	snake::resetGame(game);
 
 	snake::Field field = makeField(game.board_size);
