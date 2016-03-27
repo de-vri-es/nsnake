@@ -27,42 +27,220 @@
 #include <cursesw.h>
 
 namespace snake {
-	const int up    = 0;
-	const int right = 1;
-	const int down  = 2;
-	const int left  = 3;
-
-	std::uint32_t upper_block = L'\u2580';
-	std::uint32_t lower_block = L'\u2584';
-	std::uint32_t full_block  = L'\u2588';
-	std::uint32_t empty_block = L'\u0020';
+	std::uint32_t upper_block = U'\u2580';
+	std::uint32_t lower_block = U'\u2584';
+	std::uint32_t full_block  = U'\u2588';
+	std::uint32_t empty_block = U'\u0020';
 
 	/// A point in a 2D space.
-	struct Point {
+	struct Vector2 {
 		int x;
 		int y;
 	};
 
-	/// A 2D size.
-	struct Size {
-		int width;
-		int height;
+	bool operator==(Vector2 const & a, Vector2 const & b) { return a.x == b.x && a.y == b.y; }
+	bool operator!=(Vector2 const & a, Vector2 const & b) { return !(a == b); }
+
+	constexpr Vector2 operator*(Vector2 const & a, int scalar) { return {a.x * scalar, a.y * scalar}; };
+	constexpr Vector2 operator*(int scalar, Vector2 const & a) { return a * scalar; }
+	Vector2 & operator*=(Vector2 & a, int scalar) { return a = a * scalar; }
+
+	constexpr Vector2 operator-(Vector2 const & a) { return a * -1; }
+	constexpr Vector2 operator+(Vector2 const & a) { return a; }
+
+	constexpr Vector2 operator+(Vector2 const & a, Vector2 const & b) { return {a.x + b.x, a.y + b.y}; };
+	constexpr Vector2 operator-(Vector2 const & a, Vector2 const & b) { return a + -b; };
+	Vector2 & operator+=(Vector2 & a, Vector2 const & b) { return a = a + b; };
+	Vector2 & operator-=(Vector2 & a, Vector2 const & b) { return a = a - b; };
+
+	enum class Direction {
+		up,
+		down,
+		left,
+		right
 	};
+
+	Direction operator-(Direction direction) {
+		switch (direction) {
+			case Direction::up:    return Direction::down;
+			case Direction::down:  return Direction::up;
+			case Direction::left:  return Direction::right;
+			case Direction::right: return Direction::left;
+		}
+		throw std::logic_error("Invalid direction.");
+	}
+
+	Vector2 directionVector(Direction direction) {
+		switch (direction) {
+			case Direction::up:    return { 0, -1};
+			case Direction::down:  return { 0,  1};
+			case Direction::left:  return {-1,  0};
+			case Direction::right: return { 1,  0};
+		}
+		throw std::logic_error("Invalid direction.");
+	}
 
 	/// A segment of a snake.
 	struct Segment {
-		int direction;
+		Direction direction;
 		int length;
+	};
+
+	/// A line in 2D space.
+	struct Line {
+		Vector2 start;
+		Direction direction;
+		int length;
+
+		Line(Vector2 const & start, Direction const & direction, int length) : start(start), direction(direction), length(length) {};
+		Line(Vector2 const & start, Segment const & segment) : Line(start, segment.direction, segment.length) {};
 	};
 
 	/// A snake.
 	struct Snake {
-		Point head;
+		Vector2 head;
 		std::vector<Segment> segments;
+
+		/// Move the snake head forward in a given direction.
+		void moveHead(Direction const & direction) {
+			// If the snake changed direction, insert a new segment at the front.
+			if (segments.front().direction != direction) {
+				segments.insert(segments.begin(), {direction, 0});
+			}
+
+			// Move the head and lengthen the first segment.
+			head += directionVector(segments.front().direction);
+			segments.front().length += 1;
+		}
+
+		/// Shrink the tail of the snake.
+		void shrinkTail() {
+			segments.back().length  -= 1;
+
+			// If the final segment reaches length zero, delete it.
+			if (segments.back().length <= 0) {
+				segments.pop_back();
+			}
+		}
+	};
+
+	/// Check if a point is on a given line.
+	bool pointOnLine(Vector2 const & point, Line const & line) {
+		Vector2 diff = point - line.start;
+		switch (line.direction) {
+			case Direction::up:    return diff.x == 0 && -diff.y >= 0 && -diff.y < line.length;
+			case Direction::down:  return diff.x == 0 &&  diff.y >= 0 &&  diff.y < line.length;
+			case Direction::left:  return diff.y == 0 && -diff.x >= 0 && -diff.x < line.length;
+			case Direction::right: return diff.y == 0 &&  diff.x >= 0 &&  diff.x < line.length;
+		}
+		throw std::logic_error("Invalid direction.");
+	}
+
+	/// Check if a point is inside a given area.
+	bool pointInsideArea(Vector2 const & point, Vector2 const & area) {
+		return point.x >= 0 && point.x < area.x && point.y >= 0 && point.y < area.y;
+	}
+
+	/// Check for a collision of a point with a snake.
+	bool pointCollidesWithSnake(Vector2 const & point, Snake const & snake, bool check_head = true) {
+		Vector2 start = snake.head;
+		for (unsigned int i = 0; i < snake.segments.size(); ++i) {
+			Segment const & segment = snake.segments[i];
+			if ((check_head || i > 0) && pointOnLine(point, Line{start, -segment.direction, segment.length})) {
+				return true;
+			}
+			start = start - (directionVector(segment.direction) * segment.length);
+		}
+		return false;
+	}
+
+	/// Check if the snake has in internal or external collision.
+	bool snakeCollided(Snake const & snake, Vector2 const & field_size) {
+		return pointCollidesWithSnake(snake.head, snake, false) || !pointInsideArea(snake.head, field_size);
+	}
+
+	/// A snake game.
+	struct Game {
+		Vector2 board_size;
+		bool alive = true;
+		int score = 0;
+		Snake snake;
+		Vector2 fruit;
+		std::string message;
+
+		/// Reset a game.
+		void reset(std::mt19937 & generator) {
+			alive   = true;
+			score   = 0;
+			message = "";
+
+			snake.head.x = board_size.x / 2;
+			snake.head.y = board_size.y / 2;
+			snake.segments.clear();
+			snake.segments.push_back(Segment{Direction::up, 3});
+
+			spawnFruit(generator);
+		}
+
+		/// Spawn new fruit on the board.
+		void spawnFruit(std::mt19937 & generator) {
+			std::uniform_int_distribution<int> random(0, board_size.x * board_size.y - 1);
+			while (true) {
+				int i = random(generator);
+				Vector2 fruit = {i % board_size.x, i / board_size.x};
+				if (!pointCollidesWithSnake(fruit, snake)) {
+					this->fruit = fruit;
+					break;
+				}
+			}
+		}
+
+		/// Process a game tick.
+		void doTick(int input, std::mt19937 & generator) {
+			// If dead, only ENTER will reset the game.
+			if (!alive) {
+				if (input == KEY_ENTER || input == '\n' || input == '\r') reset(generator);
+				return;
+			}
+
+			// Set the new direction of the snake based on input.
+			Direction new_direction = snake.segments.front().direction;
+			switch (input) {
+				case KEY_UP:    new_direction = Direction::up;    break;
+				case KEY_RIGHT: new_direction = Direction::right; break;
+				case KEY_DOWN:  new_direction = Direction::down;  break;
+				case KEY_LEFT:  new_direction = Direction::left;  break;
+			}
+
+			// Dissalow about-turning the snake.
+			if (new_direction == -snake.segments.front().direction) {
+				new_direction = snake.segments.front().direction;
+			}
+
+			// Move the snake head (effectively grows the snake by 1).
+			Snake old_snake = snake;
+			snake.moveHead(new_direction);
+
+			// Check if we hit the fruit this turn, if not shrink the snake.
+			if (snake.head == fruit) {
+				score += 1;
+				spawnFruit(generator);
+			} else {
+				snake.shrinkTail();
+			}
+
+			// Make sure the snake did not collide with anything.
+			if (snakeCollided(snake, board_size)) {
+				snake   = old_snake;
+				alive   = false;
+				message = "You are dead. Press [Enter] to reset.";
+				return;
+			}
+		}
 	};
 
 	/// Color definitions.
-	enum class Color {
+	enum class Color : unsigned char {
 		black,
 		red,
 		green,
@@ -74,238 +252,72 @@ namespace snake {
 	};
 
 	/// A playing field.
-	struct Field {
-		Size size;
-		std::vector<Color> data;
+	class Field {
+		Vector2 size_;
+		std::vector<Color> data_;
+
+	public:
+		Field(Vector2 const & size) : size_(size), data_(size.x * size.y, Color::black) {}
+		Field(int x, int y) : Field(Vector2{x, y}) {};
+
+		/// Get the size of the field.
+		Vector2 const & size() const { return size_; }
+
+		/// Get the value of a pixel in a field.
+		Color       & pixel(int x, int y)       { return data_[y * size_.x + x]; }
+		Color const & pixel(int x, int y) const { return data_[y * size_.x + x]; }
+		Color       & pixel(Vector2 const & location)       { return pixel(location.x, location.y); }
+		Color const & pixel(Vector2 const & location) const { return pixel(location.x, location.y); }
+
+		/// Clear the field with a single color.
+		void clear(Color const & color = Color::black) {
+			data_.assign(data_.size(), color);
+		}
 	};
 
-	/// A snake game.
-	struct Game {
-		bool alive = true;
-		int score = 0;
-		Size board_size;
-		Snake snake;
-		Point fruit;
-		std::string message;
-		std::mt19937 * generator;
-	};
-
-	/// Get the opposite of a given direction.
-	int opposite(int direction) {
-		switch (direction) {
-			case up:    return down;
-			case right: return left;
-			case down:  return up;
-			case left:  return right;
-		}
-		throw std::logic_error("opposite: Invalid direction: " + std::to_string(direction));
-	}
-
-	/// Check if two points are equal.
-	bool pointsEqual(Point const & a, Point const & b) {
-		return a.x == b.x && a.y == b.y;
-	}
-
-	/// Get a point in a line from a given point.
-	Point advance(Point const & point, int direction, int distance = 1) {
-		Point result = point;
-		switch(direction) {
-			case up:    result.y -= distance; return result;
-			case right: result.x += distance; return result;
-			case down:  result.y += distance; return result;
-			case left:  result.x -= distance; return result;
-		}
-		throw std::logic_error("advance: Invalid direction: " + std::to_string(direction));
-	}
-
-	/// Check if a point is on a given line.
-	bool pointOnLine(Point const & point, Point const & line_start, int line_direction, int line_length) {
-		int dx = point.x - line_start.x;
-		int dy = point.y - line_start.y;
-
-		switch (line_direction) {
-			case up:     return dx == 0 && -dy >= 0 && -dy < line_length;
-			case down:   return dx == 0 &&  dy >= 0 &&  dy < line_length;
-			case left:   return dy == 0 && -dx >= 0 && -dx < line_length;
-			case right:  return dy == 0 &&  dx >= 0 &&  dx < line_length;
-		}
-
-		throw std::logic_error("pointOnLine: Invalid direction: " + std::to_string(line_direction));
-	}
-
-	/// Check if a point is inside a given area.
-	bool pointInsideArea(Point const & point, Size const & area) {
-		return point.x >= 0 && point.x < area.width && point.y >= 0 && point.y < area.height;
-	}
-
-	/// Check for a collision of a point with a snake.
-	bool pointCollidesWithSnake(Point const & point, Snake const & snake, bool check_head = true) {
-		Point start = snake.head;
-		for (unsigned int i = 0; i < snake.segments.size(); ++i) {
-			Segment const & segment = snake.segments[i];
-			if ((check_head || i > 0) && pointOnLine(point, start, opposite(segment.direction), segment.length)) {
-				return true;
-			}
-			start = advance(start, opposite(segment.direction), segment.length);
-		}
-		return false;
-	}
-
-	/// Make a field with the given width and height.
-	Field makeField(Size size) {
-		Field result;
-		result.size = size;
-		result.data = std::vector<Color>(size.width * size.height);
-		return result;
-	}
-
-	/// Clear a field from all drawings.
-	void clearField(Field & field) {
-		for (unsigned int i = 0; i < field.data.size(); ++i) {
-			field.data[i] = Color::black;
-		}
-	}
-
-	/// Get the value of a pixel in a field.
-	Color getPixel(Field const & field, Point const & location) {
-		return field.data[location.y * field.size.width + location.x];
-	}
-
-	/// Set the value of a pixel in a field.
-	void drawPixel(Field & field, Point const & location, Color value) {
-		field.data[location.y * field.size.width + location.x] = value;
+	/// Draw a point on a field.
+	void drawPoint(Field & field, Vector2 const & location, Color const & color) {
+		field.pixel(location) = color;
 	}
 
 	/// Draw a line on a field. Returns the end point of the line.
-	Point drawLine(Field & field, Point const & start, int direction, int length) {
-		Point point = start;
-		for (int i = 0; i < length; ++i) {
-			drawPixel(field, point, Color::white);
-			point = advance(point, direction);
+	Vector2 drawLine(Field & field, Line const & line) {
+		Vector2 point = line.start;
+		for (int i = 0; i < line.length; ++i) {
+			field.pixel(point) = Color::white;
+			point = point + directionVector(line.direction);
 		}
 		return point;
 	}
 
 	/// Draw a snake on a field.
 	void drawSnake(Field & field, Snake const & snake) {
-		Point start = snake.head;
+		Vector2 start = snake.head;
 		for (unsigned int i = 0; i < snake.segments.size(); ++i) {
 			Segment const & segment = snake.segments[i];
-			start = drawLine(field, start, opposite(segment.direction), segment.length);
+			start = drawLine(field, Line{start, -segment.direction, segment.length});
 		}
 	}
 
-	/// Move the snake head forward in a given direction.
-	void moveSnakeHead(Snake & snake, int direction) {
-		// If the snake changed direction, insert a new segment at the front.
-		if (snake.segments.front().direction != direction) {
-			snake.segments.insert(snake.segments.begin(), {direction, 0});
-		}
-
-		// Move the head and lengthen the first segment.
-		snake.head = advance(snake.head, snake.segments.front().direction);
-		snake.segments.front().length += 1;
-	}
-
-	/// Shrink the tail of the snake.
-	void shrinkSnakeTail(Snake & snake) {
-		snake.segments.back().length  -= 1;
-
-		// If the final segment reaches length zero, delete it.
-		if (snake.segments.back().length <= 0) {
-			snake.segments.pop_back();
-		}
-	}
-
-	/// Check if the snake has in internal or external collision.
-	bool snakeCollided(Snake const & snake, Size const & field_size) {
-		return pointCollidesWithSnake(snake.head, snake, false) || !pointInsideArea(snake.head, field_size);
-	}
-
-	/// Reset a game.
-	void resetGame(Game & game) {
-		game.alive   = true;
-		game.score   = 0;
-		game.message = "";
-
-		game.snake.head.x = game.board_size.width  / 2;
-		game.snake.head.y = game.board_size.height / 2;
-		game.snake.segments.clear();
-		game.snake.segments.push_back(Segment{up, 3});
-	}
-
-	/// Spawn new fruit on the board.
-	void spawnFruit(Game & game) {
-		std::uniform_int_distribution<int> random(0, game.board_size.width * game.board_size.height - 1);
-		Point fruit;
-		while (true) {
-			int i = random(*game.generator);
-			fruit.x = i % game.board_size.width;
-			fruit.y = i / game.board_size.width;
-			if (!pointCollidesWithSnake(fruit, game.snake)) break;
-		}
-		game.fruit = fruit;
-	}
-
-	/// Process a game tick.
-	void doTick(Game & game, int input) {
-		// If dead, only ENTER will reset the game.
-		if (!game.alive) {
-			if (input == KEY_ENTER || input == '\n' || input == '\r') {
-				resetGame(game);
-			}
-			return;
-		}
-
-		// Set the new direction of the snake based on input.
-		int new_direction = game.snake.segments.front().direction;
-		switch (input) {
-			case KEY_UP:    new_direction = up;    break;
-			case KEY_RIGHT: new_direction = right; break;
-			case KEY_DOWN:  new_direction = down;  break;
-			case KEY_LEFT:  new_direction = left;  break;
-		}
-
-		// Dissalow about-turning the snake.
-		if (new_direction == opposite(game.snake.segments.front().direction)) {
-			new_direction = game.snake.segments.front().direction;
-		}
-
-		// Move the snake head (effectively grows the snake by 1).
-		Snake old_snake = game.snake;
-		moveSnakeHead(game.snake, new_direction);
-
-		// Check if we hit the fruit this turn, if not shrink the snake.
-		if (pointsEqual(game.snake.head, game.fruit)) {
-			game.score += 1;
-			spawnFruit(game);
-		} else {
-			shrinkSnakeTail(game.snake);
-		}
-
-		// Make sure the snake did not collide with anything.
-		if (snakeCollided(game.snake, game.board_size)) {
-			game.snake   = old_snake;
-			game.alive   = false;
-			game.message = "You are dead. Press [Enter] to reset.";
-			return;
-		}
-	}
+	int colorIndex(Color fg, Color bg) {
+		return int(fg) * 8 + int(bg) + 1;
+	};
 
 	/// Print a field to the screen.
-	void printField(int y, int x, Field const & field) {
-		cchar_t buffer;
-		buffer.attr     = A_NORMAL;
-		buffer.chars[0] = upper_block;
-		buffer.chars[1] = 0;
+	void printField(int start_y, int start_x, Field const & field) {
+		cchar_t cchar_buffer  = {};
+		cchar_buffer.attr     = A_NORMAL | COLOR_PAIR(13);
+		cchar_buffer.chars[0] = upper_block;
+		cchar_buffer.chars[1] = 0;
 
-		for (int i = 0; i < field.size.height; i += 2) {
-			move(y + i / 2, x);
-			for (int j = 0; j < field.size.width; ++j) {
-				Color top    = getPixel(field, {j, i});
-				Color bottom = i + 1 < field.size.height ? getPixel(field, {j, i+1}) : Color::black;
-				buffer.attr = COLOR_PAIR(int(top) * 8 + int(bottom) + 1);
-				add_wch(&buffer);
+		for (int y = 0; y < field.size().y; y += 2) {
+			move(start_y + y / 2, start_x);
+			for (int x = 0; x < field.size().x; ++x) {
+				Color top    = field.pixel(x, y);
+				Color bottom = Color::black;
+				if (y + 1 < field.size().y) bottom = field.pixel(x, y + 1);
+				cchar_buffer.attr = COLOR_PAIR(colorIndex(top, bottom));
+				add_wch(&cchar_buffer);
 			}
 		}
 	}
@@ -330,7 +342,8 @@ bool initNcurses() {
 
 	for (int i = 0; i < 8; ++i) {
 		for (int j = 0; j < 8; ++j) {
-			init_pair(i * 8 + j + 1, i, j);
+			init_pair(colorIndex(snake::Color(i), snake::Color(j)), i, j);
+			std::cerr << colorIndex(snake::Color(i), snake::Color(j)) << " " << i << " " << j << "\n";
 		}
 	}
 
@@ -350,38 +363,41 @@ void cursesBox(int y, int x, int width, int height) {
 
 int main() {
 	std::setlocale(LC_ALL, "");
+
 	// Initialize random device and generator.
 	std::random_device rand;
 	std::mt19937 generator(rand());
 
 	snake::Game game;
-	game.generator  = &generator;
 	game.board_size = {20, 20};
-	snake::resetGame(game);
+	game.reset(generator);
 
-	snake::Field field = makeField(game.board_size);
+	snake::Field field(game.board_size);
 
-	initNcurses();
+	if (!initNcurses()) {
+		endwin();
+		return 1;
+	}
 
 	try {
 		int input = 0;
 		while (true) {
 			// Draw the current game state.
-			clearField(field);
-			drawPixel(field, game.fruit, snake::Color::yellow);
+			field.clear();
+			drawPoint(field, game.fruit, snake::Color::yellow);
 			drawSnake(field, game.snake);
 			mvprintw(0, 0, "Score: %u", game.score);           clrtoeol();
 			mvprintw(1, 0, "%s",        game.message.c_str()); clrtoeol();
 
-			cursesBox(2, 0, field.size.width + 1, field.size.height / 2 + 1);
-			printField(3, 1, field);
+			snake::printField(3, 1, field);
+			cursesBox(2, 0, field.size().x + 1, field.size().y / 2 + 1);
 			refresh();
 
 			// Wait a bit, get input and update the game.
 			std::this_thread::sleep_for(std::chrono::milliseconds(10000 / (40 + game.score)));
 			input = getch();
 			if (input == 27 || input == 'q') break;
-			doTick(game, input);
+			game.doTick(input, generator);
 		}
 	} catch (...) {
 		endwin();
