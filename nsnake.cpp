@@ -22,6 +22,7 @@
 #include <chrono>
 #include <random>
 #include <clocale>
+#include <iostream>
 
 #include <cursesw.h>
 
@@ -60,10 +61,22 @@ namespace snake {
 		std::vector<Segment> segments;
 	};
 
+	/// Color definitions.
+	enum class Color {
+		black,
+		red,
+		green,
+		yellow,
+		blue,
+		magenta,
+		cyan,
+		white,
+	};
+
 	/// A playing field.
 	struct Field {
 		Size size;
-		std::vector<bool> data;
+		std::vector<Color> data;
 	};
 
 	/// A snake game.
@@ -142,24 +155,24 @@ namespace snake {
 	Field makeField(Size size) {
 		Field result;
 		result.size = size;
-		result.data = std::vector<bool>(size.width * size.height);
+		result.data = std::vector<Color>(size.width * size.height);
 		return result;
 	}
 
 	/// Clear a field from all drawings.
 	void clearField(Field & field) {
 		for (unsigned int i = 0; i < field.data.size(); ++i) {
-			field.data[i] = false;
+			field.data[i] = Color::black;
 		}
 	}
 
 	/// Get the value of a pixel in a field.
-	bool getPixel(Field const & field, Point const & location) {
+	Color getPixel(Field const & field, Point const & location) {
 		return field.data[location.y * field.size.width + location.x];
 	}
 
 	/// Set the value of a pixel in a field.
-	void drawPixel(Field & field, Point const & location, bool value) {
+	void drawPixel(Field & field, Point const & location, Color value) {
 		field.data[location.y * field.size.width + location.x] = value;
 	}
 
@@ -167,7 +180,7 @@ namespace snake {
 	Point drawLine(Field & field, Point const & start, int direction, int length) {
 		Point point = start;
 		for (int i = 0; i < length; ++i) {
-			drawPixel(field, point, true);
+			drawPixel(field, point, Color::white);
 			point = advance(point, direction);
 		}
 		return point;
@@ -283,14 +296,15 @@ namespace snake {
 	void printField(int y, int x, Field const & field) {
 		cchar_t buffer;
 		buffer.attr     = A_NORMAL;
+		buffer.chars[0] = upper_block;
 		buffer.chars[1] = 0;
 
 		for (int i = 0; i < field.size.height; i += 2) {
 			move(y + i / 2, x);
 			for (int j = 0; j < field.size.width; ++j) {
-				bool top    = getPixel(field, {j, i});
-				bool bottom = i + 1 < field.size.height && getPixel(field, {j, i+1});
-				buffer.chars[0] = top && bottom ? full_block : top ? upper_block : bottom ? lower_block : empty_block;
+				Color top    = getPixel(field, {j, i});
+				Color bottom = i + 1 < field.size.height ? getPixel(field, {j, i+1}) : Color::black;
+				buffer.attr = COLOR_PAIR(int(top) * 8 + int(bottom) + 1);
 				add_wch(&buffer);
 			}
 		}
@@ -298,7 +312,7 @@ namespace snake {
 }
 
 /// Initialize ncurses.
-void initNcurses() {
+bool initNcurses() {
 	initscr();
 	cbreak();
 	noecho();
@@ -306,6 +320,21 @@ void initNcurses() {
 	nodelay(stdscr, true);
 	keypad(stdscr, true);
 	curs_set(0);
+
+	start_color();
+
+	if (COLOR_PAIRS - 2 < 8 * 8) {
+		std::cerr << "Not enough color pairs available.\n";
+		return false;
+	}
+
+	for (int i = 0; i < 8; ++i) {
+		for (int j = 0; j < 8; ++j) {
+			init_pair(i * 8 + j + 1, i, j);
+		}
+	}
+
+	return true;
 }
 
 void cursesBox(int y, int x, int width, int height) {
@@ -339,7 +368,7 @@ int main() {
 		while (true) {
 			// Draw the current game state.
 			clearField(field);
-			drawPixel(field, game.fruit, true);
+			drawPixel(field, game.fruit, snake::Color::yellow);
 			drawSnake(field, game.snake);
 			mvprintw(0, 0, "Score: %u", game.score);           clrtoeol();
 			mvprintw(1, 0, "%s",        game.message.c_str()); clrtoeol();
